@@ -1,0 +1,19 @@
+﻿Study Design,Country,Age (mean),Students,Gender,Female %,Health Condition,Exposure time (mins),Time between environments,Natural Environment,Urban Environment,Additional Environment (1),Additional Environment (2),Baseline measurement,Measurement at environment,Measurement during activity,Measurement final,Primary depression measure,Secondary depression measure,Activity category
+1 = Randomised crossover (2x2),1 = Japan,-,0 = No,1  = Male,-,1 = Healthy,-,1 = Next day,1 = Forest,1 = Downtown urban area,0 = No additional environment,0 = No additional environment,0 = No,1 = Post-exposure only,0 = No,0 = No,1 = shortened Japanese POMS,0 = No secondary measure,1 = Active (walk/ run)
+2 = Randomised crossover (3x3),2 = China,,1 = Yes,2 = Female,Unknown,2 = Poor mental health,,2 = Afternoon,2 = Park,2 = Residential,1 = On campus,1 = Rocky outcrop,1 = Yes,2 = Pre and post-exposure (either side of multiple activities),1 = Yes,1 = Yes,2 = shortened Korean POMS,1 = Polish PANAS,2 = Passive (sit/ stand)
+3 = Randomised crossover (4x2),3 = Korea,,,3 = Mixed,,3 = High blood pressure,,3 = Next week,3 = Biodiverse area,3 = Building site,2 = Parking lot,,,3 = Pre and post each activity,,,3 = Japanese POMS,2 = ZIPERS,3 = Mixed (both)
+4 = Randomised crossover (4x4),4 = US,,,Unknown,,4 = Chronic heart failure,,4 =  Immediately,4 = Agricultural area,4 = Railway station,3 = Blue space (beach/ canal/ forest by lake),,,,,,4 = Chinese POMS,3 = OHS,
+5 = Non-randomised crossover,5 = UK,,,,,5 = Chronic obstructive pulmonary disease,,5 = Within two weeks,,5 = Urban rooftop,4 = Urban woodland,,,,,,5 = Korean POMS,4 = Japanese PANAS,
+6 = Randomised parallel groups,6 = Sweden,,,,,,,6 = At least five days apart,,,,,,,,,6 = English POMS,,
+7 = Factorial design,7 = Denmark,,,,,,,7 = Within same season,,,,,,,,,7 = Spanish POMS,,
+8 = Single group crossover,8 = Sweden,,,,,,,Unknown,,,,,,,,,8 = Polish POMS,,
+,9 = Finland,,,,,,,N/A,,,,,,,,,9 = PANAS,,
+,10 = Spain,,,,,,,,,,,,,,,,10 = ZIPERS,,
+,11 = Poland,,,,,,,,,,,,,,,,11 = NMS,,
+,,,,,,,,,,,,,,,,,12 = MACL,,
+,,,,,,,,,,,,,,,,,13 = BRUMS,,
+,,,,,,,,,,,,,,,,,14 = Bespoke,,
+,,,,,,,,,,,,,,,,,15 = Danish POMS,,
+,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,
