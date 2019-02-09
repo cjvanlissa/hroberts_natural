@@ -1,4 +1,3 @@
-getwd()
 library(xlsx)
 
 zipers_sd <- list(c(n = 102, sd = 1.25), # Hartig 1996
@@ -14,7 +13,8 @@ zipers_sd <- list(c(n = 102, sd = 1.25), # Hartig 1996
 
 zipers_sd <- mean(sapply(zipers_sd, function(x)x[2]))
 
-data <- read.xlsx("Metaanalysis_table_cj_hr_cj.xlsx", 1, stringsAsFactors = FALSE)
+#data <- read.xlsx("Metaanalysis_table_cj_hr_cj.xlsx", 1, stringsAsFactors = FALSE)
+data <- read.table("data_update.csv", sep =";", header = TRUE, stringsAsFactors = FALSE)
 data <- data[!rowSums(is.na(data)) == ncol(data),]
 data[data == "N/A"] <- NA
 data[data == "Unknown"] <- NA
@@ -26,13 +26,14 @@ data <- data[, -match(drop_cols, names(data))]
 
 names(data) <- tolower(names(data))
 names(data)[1] <- "title"
-codes <- read.xlsx("Metaanalysis_table_cj_hr_cj.xlsx", 2)
+codes <- read.xlsx("Metaanalysis_table_cj_hr_cj.xlsx", 2, stringsAsFactors = T)
 codes <- codes[, -match(drop_cols, names(codes))]
 names(codes) <- tolower(names(codes))
 
+distances <- apply(adist(names(data), y = names(codes), fixed = TRUE,
+      ignore.case = TRUE), 2, which.min)
 
-names(codes)[na.omit(pmatch(names(data), names(codes)))] <- names(data)[pmatch(names(codes), names(data))]
-
+names(data)[distances] <- names(codes)
 #names(codes)[which(is.na(pmatch(names(codes), names(data))))]
 #names(data)[!sapply(names(data), `%in%`, names(codes))][-1]
 
@@ -49,12 +50,12 @@ for(x in names(codes)){
   } 
   lab <- gsub("\\d+\\s+=\\s+(.*)$", "\\1", cods)
   tmp <- data[[x]]
-  if(any(!grepl("^\\d+$", tmp))) warning("Some labels are not numeric")
+  if(any(!grepl("^\\d+$", tmp))) warning("Some labels are not numeric in variable ", x)
   tmp <- gsub("(\\d+).*$", "\\1", tmp)
   if(any(!grepl("^\\d+$", na.omit(tmp)))){
-    warning("Some labels are still not numeric")
+    warning("Some labels are still not numeric in variable ", x)
     browser()
   } 
   data[[x]] <- lab[match(data[[x]], val)]
 }
-
+write.csv(data, "cleaned_data.csv", row.names = FALSE)
