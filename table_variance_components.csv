@@ -1,0 +1,5 @@
+"","df","AIC","BIC","ll","LRT","p"
+"Full three-level model","3","79.86","84.85","-36.93","",""
+"Between-studies variance constrained","2","93.44","96.77","-44.72","15.59","0.000"
+"Within-studies variance constrained","2","77.86","81.18","-36.93","0.00","1.000"
+"Both variance components constrained","1","256.35","258.01","-127.17","180.49","0.000"

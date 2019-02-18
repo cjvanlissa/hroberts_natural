@@ -1,6 +1,13 @@
 .Rproj.user
 .Rhistory
-.RData
+*.RData
 .Ruserdata
 *.xlsx
 *.docx
+*.png
+*.fff
+*.log
+*.pdf
+*.tex
+*.ttt
+results_files/
