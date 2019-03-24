@@ -558,7 +558,7 @@ tmp$Variable <- gsub("\\.L", "Linear", tmp$Variable)
 tmp$Variable <- gsub("\\.Q", "Quad.", tmp$Variable)
 tmp$Variable <- gsub("\\.C", "Cubic", tmp$Variable)
 tmp$Variable[1] <- "Intercept"
-
+write.csv(tmp, "modtable.csv", row.names = FALSE)
 apa_table(tmp, caption = "Meta-regression model with most important moderators",
           note = "* < .05, ** < .01, *** < .001. SE = standard error, Z = z-score, p = p-value, CI = confidence interval")
 ```
