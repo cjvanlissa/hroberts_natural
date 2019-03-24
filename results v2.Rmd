@@ -1,0 +1,578 @@
+---
+title             : "Results for meta-analysis on exposure to natural environments and depression"
+shorttitle        : "NATURE AND DEPRESSION"
+
+author: 
+  - name          : "Caspar J. Van Lissa"
+    affiliation   : "1"
+    corresponding : yes    # Define only one corresponding author
+    address       : "Padualaan 14, 3584CH Utrecht, The Netherlands"
+    email         : "c.j.vanlissa@uu.nl"
+
+affiliation:
+  - id            : "1"
+    institution   : "Utrecht University"
+
+
+keywords          : "keywords"
+wordcount         : "X"
+
+bibliography      : ["r-references.bib"]
+
+floatsintext      : no
+figurelist        : no
+tablelist         : no
+footnotelist      : no
+linenumbers       : yes
+mask              : no
+draft             : no
+
+documentclass     : "apa6"
+classoption       : "man"
+output            : papaja::apa6_pdf
+---
+
+```{r analysis-preferences}
+# Seed for random number generation
+set.seed(42)
+knitr::opts_chunk$set(cache.extra = knitr::rand_seed)
+```
+
+```{r setup, include = FALSE}
+library("papaja")
+library(metaforest)
+library(missRanger)
+library(motley)
+library(english)
+fulldat <- dat <- read.csv("dat_hroberts.csv")
+run_everything <- FALSE
+```
+
+```{r select_mods}
+moderators <- c("study.design", "country", "age..mean.", "students", "gender",
+                "female..", "health.condition", "exposure.time..mins.",
+                "time.between.environments", "natural.environment",
+                "number.of.natural.envts", "urban.environment",
+                "number.of.urban.envts", "baseline.measurement",
+                "measurement.at.environment", "measurement.during.activity",
+                "measurement.final", "scale",
+                "activity.category", "es_type")
+newnames <- c("Design", "Country", "Mean age", "Students", "Sex",
+                "Female", "Health condition", "Exposure time",
+                "Time between environments", "Natural environment",
+                "Number of natural envts", "Urban environment",
+                "Number of urban envts", "Baseline measurement",
+                "Measurement at environment", "Measurement during activity",
+                "Measurement final", "Scale",
+                "Activity category", "Type of ES")
+names(newnames) <- moderators
+rename_fun <- function(x, old, new){
+  x[na.omit(match(old, x))] <- new[old %in% x]
+  x
+}
+
+df <- dat[, moderators]
+
+is_char <- sapply(df, is.character)
+df[, is_char] <- lapply(df[, is_char], as.factor)
+df$id_effectsize <- 1L:nrow(dat)
+```
+
+```{r missingness, include = FALSE}
+missingness <- sapply(df, function(x) sum(is.na(x))/length(x))
+miss_tab <- table(missingness)
+many_missings <- names(dat)[missingness > .2]
+many_missings
+# CJ: None of the moderators used have substantial missingness.
+
+# Any factor variables with missingness? No.
+names(df)[sapply(df, function(x) inherits(x, c("factor", "character"))) & missingness > 0]
+
+set.seed(47484)
+imputed <- missRanger(df, pmm.k = 3, num.trees = 1000, returnOOB = TRUE)
+attr(imputed, "oob")
+
+df <- data.frame(imputed, dat[, c("id_sample", "yi", "vi")])
+
+df$time.between.environments <- ordered(df$time.between.environments, levels = c("Same day", "Next day", "Next week", "Longer"))
+```
+
+
+
+
+```{r metaforest}
+if(run_everything){
+  # CJ: Set a random seed. Required to ensure computational reproducibility, as
+  #     MetaForest uses random numbers to draw bootstrap samples
+  
+  set.seed(300)
+  
+  # CJ: Check how many iterations metaforest needs to converge
+  check_conv <- MetaForest(as.formula(paste0("yi~", paste(moderators, collapse = "+"))),
+                           data = df,
+                           study = "id_sample",
+                           whichweights = "random",
+                           num.trees = 10000)
+  saveRDS(check_conv," check_conv.RData")
+  # Plot convergence trajectory
+  plot(check_conv)
+  
+  # CJ: Perform recursive preselection
+  
+  #names(df) <- gsub("\\.+", "_", names(df))
+  #names(df) <- gsub("_$", "", names(df))
+  preselected <- preselect(check_conv, replications = 100, algorithm = "replicate")
+  
+  saveRDS(preselected, "preselected_rep.RData")
+  p <- plot(preselected, label_elements = newnames)
+  ggsave("preselect_rep.png", p, width =  6.875, units = "in")
+} else {
+  check_conv <- readRDS(" check_conv.RData")
+  preselected <- readRDS("preselected_rep.RData")
+}
+```
+
+```{r tuning_forest}
+if(run_everything){
+  # CJ: Tune the metaforest analysis
+  # Load the caret library
+  library(caret)
+  # Set up 10-fold grouped (=clustered) CV
+  cv_folds <- trainControl(index = groupKFold(df$id_sample, k = 10),
+               method = "cv")
+  
+  
+  # Set up a tuning grid for the three tuning parameters of MetaForest
+  tuning_grid <- expand.grid(whichweights = c("random", "fixed", "unif"),
+                             mtry = 2:6,
+                             min.node.size = 2:6)
+  
+  # Select only moderators and vi
+  X <- df[, c("vi", "id_sample", preselect_vars(preselected, cutoff = .4))]
+  set.seed(747)
+  # Train the model
+  mf_cv <- train(y = df$yi,
+                 x = X,
+                 study = "id_sample",
+                 method = ModelInfo_mf(),
+                 trControl = cv_folds,
+                 tuneGrid = tuning_grid,
+                 num.trees = 10000)
+  
+  # Check result
+  mf_cv
+  #The final values used for the model were whichweights = fixed, mtry = 5 and min.node.size = 6.
+  saveRDS(mf_cv, "mf_cv.RData")
+  
+  # Cross-validated R2 of the final model:
+  mf_cv$results[which.min(mf_cv$results$RMSE), ]$Rsquared
+  # Extract final model
+  final <- mf_cv$finalModel
+  # Plot convergence
+  plot(final)
+  # OOB  R2 of the final model:
+  final$forest$r.squared
+  
+  # Plot variable importance
+  VarImpPlot(final)
+  
+  # Plot partial dependence
+  arr <- as.list(newnames)
+  names(arr) <- moderators
+  mylabel <- function(val) { return(lapply(val, function(x) arr[x])) }
+  
+  p <- PartialDependence(final, vars = names(final$forest$variable.importance)[order(final$forest$variable.importance, decreasing = TRUE)], rawdata = T, pi = .95, output = "list")
+
+  p <- lapply(p, function(x){
+    x + facet_wrap(~Variable, labeller=mylabel)
+  })
+  p[[2]] <- p[[2]]+scale_x_discrete(labels = c("Agr.", "Bio", "Forest", "Park"))
+  p[[4]] <- p[[4]]+scale_x_discrete(labels = c("Same", "Next", "Next wk", "Longer"))
+  p[[8]] <- p[[8]]+scale_x_discrete(labels = c("Urban", "Other", "Resid."))
+
+
+  png("PDP.png",  width = 6.875 , height = 6.8, units = "in", res = 300)
+  metaforest:::merge_plots(p)
+  dev.off()
+  
+} else {
+  mf_cv <- readRDS("mf_cv.RData")
+  final <- mf_cv$finalModel
+}
+```
+
+```{r rma_analyses}
+if(run_everything){
+  #Conduct meta-analyses
+  model.full <- rma.mv(yi, vi, random = list(~ 1 | id_sample, ~ 1 | id_effectsize), data=df) 
+  model.between_null <- rma.mv(yi, vi, random = list(~ 1 | id_sample, ~ 1 | id_effectsize), sigma2=c(NA,0), data=df) 
+  model.within_null <- rma.mv(yi, vi, random = list(~ 1 | id_sample, ~ 1 | id_effectsize), sigma2=c(0,NA), data=df) 
+  model.both_null <- rma.mv(yi, vi, random = list(~ 1 | id_sample, ~ 1 | id_effectsize), sigma2=c(0,0), data=df) 
+  
+  aov_between <- anova(model.full,model.between_null) 
+  aov_within <- anova(model.full,model.within_null) 
+  aov_bothnull <- anova(model.full,model.both_null) 
+  aov_table <- rbind(
+  c(df=aov_within$p.f, aov_within$fit.stats.f[c(3:4, 1)], LRT = NA, p = NA),
+  c(df=aov_between$p.r, aov_between$fit.stats.r[c(3:4, 1)], LRT = aov_between$LRT, p = aov_between$pval),
+  c(df=aov_within$p.r, aov_within$fit.stats.r[c(3:4, 1)], LRT = aov_within$LRT, p = aov_within$pval),
+  c(df=aov_bothnull$p.r, aov_bothnull$fit.stats.r[c(3:4, 1)], LRT = aov_bothnull$LRT, p = aov_bothnull$pval)
+  )
+  rownames(aov_table) <- c("Full three-level model", "Between-studies variance constrained", "Within-studies variance constrained", "Both variance components constrained")
+  aov_table[,-c(1,6)] <- formatC(aov_table[,-c(1,6)], digits = 2, format = "f")
+  aov_table[,6] <- formatC(as.numeric(aov_table[,6]), digits = 3, format = "f")
+  aov_table[1, 5:6] <-""
+  write.csv(aov_table, "table_variance_components.csv")
+  confints <- confint(model.full)
+  rma_random <- rma(yi, vi, data=df) 
+  png("forest.png",  width = 6.875 , height = 10, units = "in", res = 300)
+    forest(rma_random, slab = fulldat$title, xlab = "Effect size")
+  dev.off()
+  save(rma_random, model.full, aov_table, confints, file = "metafor_results.RData")
+  # Check convergence of variance components:
+  #par(mfrow=c(2,1))
+  #plot.profile1 <- profile(model.full, sigma2=1)
+  #plot.profile2 <- profile(model.full, sigma2=2)
+} else {
+  load("metafor_results.RData")
+  i2s <- calc_i2(model.full)
+  names(i2s) <- names(i2s)[c(1,3,2)]
+}
+```
+
+
+```{r rma mods, warnings = F}
+
+if(run_everything){
+  # Final RMA model ---------------------------------------------------------
+  
+  # Starting with only the 6 best predictors
+  rma_mods <- names(final$forest$variable.importance)[order(final$forest$variable.importance, decreasing = TRUE)][1:8]
+  rma_dat <- df[, rma_mods]
+  levels(rma_dat$gender)
+  
+  contrasts(rma_dat$gender) <- cbind(Mixed_FemaleMale = c(1, 1, -2),
+                                     Male_Female = c(0, -1, 1))
+  contrasts(rma_dat$country) <- cbind(Asia_USEurope = c(-2, 1, 1),
+                                     US_Europe = c(0, 1, -1))
+  
+  contrasts(rma_dat$natural.environment) <- cbind(ABF_Park = c(-1, -1, -1, 3),
+                                                  A_BF = c(-2, 1, 1, 0),
+                                                  B_F = c(0, -1, 1, 0))
+  
+  contrasts(rma_dat$urban.environment) <- cbind(DowntownOther_Residential = c(-1, -1, 2),
+                                                Downtown_Other = c(-1, 1, 0))
+  
+  contrasts(rma_dat$es_type) <- cbind(SMCR_SMD = c(-1, 1))
+  contrasts(rma_dat$baseline.measurement) <- cbind(No_Yes = c(-1, 1))
+  
+  rma_dat$female.. <- scale(rma_dat$female.., scale = F)
+  #rma_dat$female_over_45 <- ifelse(rma_dat$female.. < 45 & , 0, 1)
+  #rma_dat$female_over_65 <- ifelse(rma_dat$female.. > 65, 0, 1)
+  
+  # Create informative contrasts for factor variables
+  #contrasts(rma_dat$Biome) <- cbind(
+  #  BoCrGrSh_STeTr = c(-1, -1, -1, -1,  2,  2),
+  #  Te_Tr          = c( 0,  0,  0,  0, -1,  1),
+  #  Bo_Cr          = c(-1,  1,  0,  0,  0,  0),
+  #  Bo_Gr          = c(-1,  0,  1,  0,  0,  0),
+  #  Bo_Sh          = c(-1,  0,  0,  1,  0,  0))
+  
+  # Drop unused levels, otherwise rma() goes haywire
+  #rma_dat$Fumigation.type <- droplevels(rma_dat$Fumigation.type)
+  
+  # Create full model, with all important moderators, and including theoretically 
+  # relevant interactions between Myc and CNr / P
+  X_mods <- model.matrix(~ ., rma_dat)[,-1]
+  rma_all <- rma(yi = df$yi, vi = df$vi, mods = X_mods)
+  
+  X_mods_es_only <- model.matrix(~ es_type, rma_dat)[,-1, drop = F]
+  rma_es_only <- rma(yi = df$yi, vi = df$vi, mods = X_mods_es_only)
+  # Estimate prediction accuracy for new data using cross-validation
+  set.seed(751)
+  rma_cv <- train(y = df$yi,
+                  x = X_mods,
+                  weights = df$vi,
+                  control=list(stepadj=.5),
+                  method = ModelInfo_rma(),
+                  trControl = cv_folds
+  )
+  
+  rma_cv_es_only <- train(y = df$yi,
+                  x = X_mods_es_only,
+                  weights = df$vi,
+                  control=list(stepadj=.5),
+                  method = ModelInfo_rma(),
+                  trControl = cv_folds
+  )
+  
+  
+  # Cross-validated R2 is .36
+  rma_cv$results$Rsquared
+  
+  #contrasts(rma_dat$es_type) <- cbind(
+  #  SMD_SMCR       = c(-1, -1,  1,  1),
+  #  SMD_SMD_t      = c( 0,  0, -1,  1),
+  #  SMCR_SMCR_t    = c(-1,  1,  0,  0))
+  #contrasts(rma_dat$es_type) <- contr.treatment(levels(rma_dat$es_type))
+  levels(rma_dat$es_type) <- paste0(levels(rma_dat$es_type), ", N = ", table(rma_dat$es_type))
+    
+  rma_es_type <- rma(df$yi, df$vi, mods = ~es_type-1, data = rma_dat)
+  save(rma_mods, rma_all, rma_es_only, rma_cv, rma_cv_es_only, rma_es_type, file = "rma_mods.RData")
+} else {
+  load("rma_mods.RData")
+}
+
+```
+
+# Methods
+
+## Descriptive statistics
+
+Observed effect sizes ranged from `r report(range(df[["yi"]])[1], equals = FALSE)` to `r report(range(df[["yi"]])[2], equals = FALSE)`. The unweighted mean effect size was 
+$M_g `r report(mean(df[["yi"]]))`$, $SD `r report(sd(df[["yi"]]))`$.
+`r Words(sum(table(df[["id_sample"]]) >1))` studies reported two effect sizes (i.e., two outcomes). Because of this, we first used a three-level meta-analysis to estimate the amount of within-study- and between-studies variance [@vandennoortgateMetaanalysisMultipleOutcomes2015].
+
+As indicated in table \@ref(tab:variancetable),
+the within-study variance component did not differ significantly from zero, $\sigma^2_w `r report(model.full[["sigma2"]][1])`$, 95% CI [`r report(confints[[1]][["random"]][1,2], equals = F)`, `r report(confints[[1]][["random"]][1,3], equals = F)`]. The between-studies variance component, on the other hand, was significant, $\sigma^2_b `r report(model.full[["sigma2"]][2])`$, 95% CI [`r report(confints[[2]][["random"]][1,2], equals = F)`, `r report(confints[[2]][["random"]][1,3], equals = F)`]. 
+Thus, the variation in observed effect sizes was primarily due to differences
+between studies. As the within-study variance component was near-zero, and the
+Akaike information criterion (AIC) and Bayesian Information Criterion (BIC) 
+for a model with within-studies variance constrained to zero were
+lowest out of all models compared, there was no advantage to the multilevel approach. 
+We therefore proceeded with a random-effects meta-analysis, which only includes
+a between-studies variance component.
+
+```{r variancetable, results = "asis"}
+apa_table(aov_table, caption = 
+            "Comparing the fit of different multi-level models")
+```
+
+```{r pub_bias, fig.align='center', warning = FALSE} 
+beggs <- regtest(x = df$yi, vi = df$vi)
+#file drawer analysis (fail and safe)
+filedrawer <- fsn(yi = df$yi, vi = df$vi)
+#funnel_plotlyfi(model.full, data$Paper)
+```
+
+### Summary effect size
+
+The summary effect from random-effect meta-analysis was
+significantly different from zero, 
+$\gamma `r report(rma_random[["b"]][1])`, p `r report(rma_random[["pval"]])`,$
+95\% CI$[`r report(rma_random[["ci.lb"]], equals = F)`,
+`r report(rma_random[["ci.ub"]], equals = F)`]$. The random effect was also 
+significant, indicating that there was residual heterogeneity between studies,
+$\tau^2 `r report(rma_random[["tau2"]])`$, 
+$SE `r report(rma_random[["se.tau2"]])`$,
+$Q_{resid}(`r nrow(df)-nrow(rma_random[["b"]])`) `r report(rma_random[["QE"]])`$,
+$p `r report(rma_random[["QEp"]])`$. See Figure \@ref(fig:forest) for a forest
+plot of the included studies.
+
+```{r forest, echo=FALSE, fig.cap="Forest plot"}
+knitr::include_graphics("forest.png")
+```
+
+## Publication bias
+
+A visual inspection of the funnel plot in Figure \@ref(fig:funnel-plot) was 
+inconclusive with regard to publication bias. 
+There was a lack of studies in both lower corners 
+of the funnel plot, indicating that most small-sample studies reported effects
+with values close to the average weighted effect size. There were also some
+relatively high-powered studies with large, negative effects. Beggs' test for
+the rank correlation between effect size and sampling variance was non-significant, however;
+$z `r report(beggs[["zval"]])`, p `r report(beggs[["pval"]])`$.
+Moreover, file drawer analysis indicated that $K = `r filedrawer[["fsnum"]]`$
+studies averaging null-results would have to be added to render the summary
+effect non-significant. Thus, the extent of publication bias is hard to
+ascertain.
+
+```{r funnel-plot, echo=FALSE, fig.cap="Funnel plot"}
+
+x <- rma(df$yi, df$vi)
+  tau2 <- x$tau2
+  weights <- 1 / (x$vi + tau2)
+
+  estimate = x$b[1]
+  se <- x$se
+
+  ses <- sqrt(x$vi)
+
+  se.seq = seq(0, max(ses), 0.001)
+
+  #Compute vectors of the lower-limit and upper limit values for
+  #the 95% CI region
+  ll95 = estimate - (1.96 * se.seq)
+  ul95 = estimate + (1.96 * se.seq)
+
+  #Do this for a 99% CI region too
+  ll99 = estimate - (3.29 * se.seq)
+  ul99 = estimate + (3.29 * se.seq)
+
+  #Confidence interval for summary effect size
+  meanll95 = estimate - (1.96 * se)
+  meanul95 = estimate + (1.96 * se)
+
+  dfCI = data.frame(ll95, ul95, ll99, ul99, se.seq, estimate, meanll95, meanul95)
+  dat <-
+    data.frame(
+      se = ses,
+      R = x$yi,
+      weights = weights / sum(weights),
+      es_type = df$es_type
+    )
+
+  #Draw Plot
+  fp = ggplot(data = dat) +
+    geom_line(aes(x = ll95, y = se.seq), linetype = 'dotted', data = dfCI) +
+    geom_line(aes(x = ul95, y = se.seq), linetype = 'dotted', data = dfCI) +
+    geom_line(aes(x = ll99, y = se.seq), linetype = 'dashed', data = dfCI) +
+    geom_line(aes(x = ul99, y = se.seq), linetype = 'dashed', data = dfCI) +
+    geom_segment(aes(
+      x = meanll95,
+      y = min(se.seq),
+      xend = meanll95,
+      yend = max(se.seq)
+    ), data = dfCI) +
+    geom_segment(aes(
+      x = meanul95,
+      y = min(se.seq),
+      xend = meanul95,
+      yend = max(se.seq)
+    ), data = dfCI) +
+    geom_point(aes(
+      x = R,
+      y = se,
+      size = weights#,
+      #shape = es_type
+    ), alpha = .2) +
+    ylab('Standard Error') + xlab('Effect size') +
+    scale_size_continuous(guide = "none")+
+    #scale_shape_discrete(name = "Effect size:")+
+    scale_y_continuous(trans = "reverse",
+                       limits = c(max(dat$se), 0),
+                       expand = c(0, 0)) +
+    #scale_x_continuous(breaks = seq(-1.25, 2, 0.25)) +
+    theme_bw()+
+    theme(
+          legend.direction = "vertical",
+          legend.box = "horizontal",
+          legend.position = c(.997, .997),
+          legend.justification = c(1, 1))
+        
+    #theme(legend.position="none")
+  #ggplotly(fp, tooltip = "text") %>% config(displayModeBar = F) %>%
+  #  layout(yaxis=list(fixedrange=TRUE), xaxis=list(fixedrange=TRUE))
+fp
+
+```
+
+
+<!--## Missing data
+
+Missingness was very limited; `r words(sum(missingness > 0))` variables (`r tolower(paste(rename_fun(names(missingness)[missingness > 0], 
+names(newnames), newnames), collapse = ", "))`) had some
+missing values, ranging from $`r report(100*min(as.numeric(names(miss_tab)[-1])), digits = 0, equals = F)`-
+`r report(100*max(as.numeric(names(miss_tab)[-1])), digits = 0, equals = F)`\%$. 
+Because both MetaForest and metafor require complete data, and no methods for
+integrating multiply imputed data are currently available, we applied single
+imputation 
+using the missForest algorithm [@stekhovenMissForestNonparametricMissing2012].
+In simulation
+studies, this random forests-based imputation method outperformed multiple
+imputation. Like any random forests-based technique, The main advantage of this
+method are that it does not make any
+distributional assumptions, which means it easily handles (multivariate)
+non-normal data and complex interactions and non-linear relations amongst
+the data. Moreover, it does not extrapolate beyond the range of the observed
+data.-->
+
+## Moderation
+
+The number of moderators coded (`r length(moderators)`) was large relative to
+the sample size. Consequently, including all moderators in a meta-regression 
+risks overfitting the model (i.e., describing noise in the data, rather 
+than true effects). To select only relevant moderators, we used MetaForest [@vanlissaMetaforestExploringHeterogeneity2018; 
+@vanlissaMetaForestExploringHeterogeneity2017]; an exploratory approach to 
+identify moderators in meta-analysis, based on the machine-learning algorithm 
+"random forests".
+
+We first conducted random-effects MetaForest analysis with 10,000 iterations, 
+and replicated it 100 times. The replicated variable importance metrics can be
+seen in Figure \@ref(fig:replicatedmf). All variables that displayed negative variable importance,
+or in other words, reduced the predictive performance of the model, were
+dropped. As a result, eleven variables were not considered for further analysis.
+
+The MetaForest analysis was tuned using the remaining nine moderators.
+Tuning means identifying the optimal settings for the analysis, based on the
+smallest 10-fold cross-validated prediction error [root mean square error, RMSE; @hastieElementsStatisticalLearning2009]. The optimal model used 
+`r c("random-effects", "fixed-effects", "uniform")[as.numeric(mf_cv$results$whichweights[which.min(mf_cv$results$RMSE)])]` weights, `r mf_cv$results$mtry[which.min(mf_cv$results$RMSE)]` candidate variables at each split,
+and a minimal terminal node size of `r mf_cv$results$min.node.size[which.min(mf_cv$results$RMSE)]`.
+The estimated predictive performance in new data was positive; cross-validated $R^2_{cv} `r report(mf_cv[["results"]][["Rsquared"]][which.min(mf_cv[["results"]][["RMSE"]])])`$, 
+out-of-bag $R^2_{oob} `r report(final$forest$r.squared)`$.
+
+The relative variable importance of the moderators in the final model is shown
+in Figure \@ref(fig:varimp). Partial dependencies were also analyzed. 
+Partial dependency plots (Figure \@ref(fig:pdp)) show the relationship the model has
+learned, in terms of predicting
+the influence of each of the selected moderators on the effect size, while
+averaging over all other moderators. The model predicts that for a sample with a
+lower proportion of women, the effect size is larger. The effect size was also
+larger for agricultural, biodiverse and forest environments, compared to a park
+environment. Differences were also seen in the time between environments – those
+that had a longer crossover period appeared to have a smaller effect size.
+Categories within other moderators showed very similar effects.
+
+
+```{r replicatedmf, echo=FALSE, fig.cap="Replicated MetaForest for variable preselection"}
+knitr::include_graphics("preselect_rep.png")
+```
+
+```{r varimp, echo=FALSE, fig.cap="Variable importance for final model", warning=FALSE}
+VarImpPlot(final, label_elements = newnames)
+```
+
+```{r pdp, echo=FALSE, fig.cap="Partial dependence plot", warning=FALSE}
+knitr::include_graphics("PDP.png")
+```
+
+### Meta-regression
+
+The `r words(length(rma_mods))` most influential moderators identified in the
+MetaForest analysis were entered into a meta-regression \@ref(tab:rma-modtable). 
+However, none of the moderators had significant effects in a linear model.
+
+```{r rma-modtable, results = "asis"}
+tmp <- motley:::printResults.rma(rma_cv$finalModel, keepCols = c("label", "est_sig", "se", "zval", "pval", "confint"))
+names(tmp) <- c("Variable", "Estimate", "SE", "Z", "p", "CI")
+for(this_name in names(newnames)){
+  if(any(grepl(paste0(this_name, ".{1,}$"), tmp$Variable))){
+    tmp$Variable <- gsub(this_name, paste0(newnames[this_name], ": "), tmp$Variable)
+  } else {
+    tmp$Variable <- gsub(this_name, newnames[this_name], tmp$Variable)
+  }
+}
+tmp$Variable <- gsub("_", " vs ", tmp$Variable)
+tmp$Variable <- gsub("\\.L", "Linear", tmp$Variable)
+tmp$Variable <- gsub("\\.Q", "Quad.", tmp$Variable)
+tmp$Variable <- gsub("\\.C", "Cubic", tmp$Variable)
+tmp$Variable[1] <- "Intercept"
+
+apa_table(tmp, caption = "Meta-regression model with most important moderators",
+          note = "* < .05, ** < .01, *** < .001. SE = standard error, Z = z-score, p = p-value, CI = confidence interval")
+```
+
+\newpage
+
+# References
+```{r create_r-references}
+r_refs(file = "r-references.bib")
+```
+
+\begingroup
+\setlength{\parindent}{-0.5in}
+\setlength{\leftskip}{0.5in}
+
+<div id = "refs"></div>
+\endgroup
